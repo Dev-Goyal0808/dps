@@ -132,3 +132,4 @@ These commands are documentation for the implementation phase. They will become 
 
 StegoCrypt is an educational prototype, not a production messaging system. It will use established cryptographic libraries and will not implement cryptographic primitives manually. The project will explicitly document its trust model, local key configuration, payload limits, in-memory session behavior, and the lack of robustness against JPEG compression or image resizing.
 # dps
+# dps

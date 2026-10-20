@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stegocrypt-backend"
+version = "1.0.0"
+description = "FastAPI backend for the StegoCrypt demonstration"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110,<1",
+    "uvicorn[standard]>=0.29,<1",
+    "cryptography>=42,<46",
+    "Pillow>=10.2,<12",
+    "python-multipart>=0.0.9,<1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
+ignore = ["B008", "E501"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["app"]
+strict = true
+ignore_missing_imports = true
+disallow_any_generics = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
