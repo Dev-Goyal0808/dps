@@ -12,6 +12,11 @@ The evaluation dashboard must distinguish measured values from theoretical expec
 - Network transfer time.
 - Throughput.
 - Recovery and tamper-detection status.
+- Sample-level image error (MSE, RMSE, maximum channel error).
+- How much of the carrier actually changed (changed samples and their share).
+- Embedding rate in bits per pixel.
+- Payload overhead over the plaintext.
+- Shannon entropy of the serialized payload.
 
 ## 2. PSNR
 
@@ -47,6 +52,8 @@ The evaluation must document:
 - Whether the comparison uses the original in-memory RGB image or the reloaded PNG.
 
 The recommended initial choice is RGB comparison on the original and reloaded PNG images.
+
+The implementation uses the global SSIM formula over all RGB samples with the standard 8-bit constants `C1 = 6.5025` and `C2 = 58.5225`. A small payload touches a tiny fraction of samples, so this value sits at or extremely near `1.0` and is not by itself evidence of quality. The sample-level metrics in section 10 are the discriminating measurements.
 
 ## 4. Capacity metrics
 
@@ -129,7 +136,64 @@ Expected result:
 | Tamper test | One fixed image | One fixed message | Authentication failure rate. |
 | LAN test | Two computers | Several message sizes | Network timing and throughput. |
 
-## 10. Interpretation
+## 10. Additional measured metrics
+
+Every value in this section is computed from the current message: the in-memory cover image, the received PNG, the serialized payload, and the phase timers.
+
+### 10.1 Sample-level image error
+
+```text
+MSE                = mean((I - K)²) over all RGB samples
+RMSE               = sqrt(MSE)
+max_abs_error      = max|I - K| over all RGB samples
+changed_samples    = count(I != K)
+changed_sample_ratio = changed_samples / (3 × width × height)
+mean_abs_error_changed = sum(|I - K| over changed samples) / changed_samples
+```
+
+These stay informative when SSIM saturates: a larger payload changes more samples, and a larger QIM delta moves each changed sample further.
+
+### 10.2 Embedding rate
+
+```text
+embedding_rate_bpp = (payload_bytes + 16) × 8 / (width × height)
+```
+
+The 16 bytes are the SCQ1 container header. Utilisation measures the same load against total capacity.
+
+### 10.3 Payload overhead and entropy
+
+```text
+payload_overhead_bytes = payload_bytes - plaintext_bytes
+```
+
+The SCEP envelope adds a 23-byte header, a 12-byte nonce, and a 16-byte GCM tag, so the overhead is 51 bytes.
+
+```text
+ciphertext_entropy_bits_per_byte = -Σ p(b) × log2 p(b)
+```
+
+Measured over the serialized payload. The entropy of `N` sampled bytes is bounded by `min(8, log2(N))`, so a short message legitimately reports below 8 bits/byte; the reported ceiling makes that explicit. A value close to its ceiling means byte values are near-uniform, which is expected for authenticated ciphertext. This is a property of the output, not a security proof.
+
+### 10.4 Timing and throughput
+
+```text
+workflow_time_ms = transmission + extraction + decryption   (receiver side)
+throughput_bytes_per_second = image_bytes / transfer_seconds
+payload_throughput_bytes_per_second = payload_bytes / workflow_seconds
+```
+
+Connection, key-exchange, encryption, and embedding durations are measured and published by the sender the moment the payload is embedded, before the image is sent. Transmission time and image throughput are measured by the receiver, so they share a clock with the receiver workflow time and payload throughput shown next to them. `payload_throughput` uses the receiver workflow (transfer + extraction + decryption). A field that has not been published yet is `null`, never `0` — the two mean different things.
+
+### 10.5 Round-trip verification
+
+`plaintext_match` compares the receiver's decrypted bytes with the sender's original input. A verified result requires both the CRC and GCM tag checks to pass and the bytes to be identical.
+
+### 10.6 Evaluation request flag
+
+With `include_image_comparison = false`, the evaluation returns capacity, crypto, timing, throughput, and recovery values while every image-derived field is `null`.
+
+## 11. Interpretation
 
 The application must not claim that a particular PSNR or SSIM value is guaranteed. Results depend on:
 

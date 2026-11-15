@@ -55,6 +55,8 @@ class Settings:
     identity_private_key_path: Path | None = None
     trusted_peer_keys: tuple[str, ...] = field(default_factory=tuple)
     cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://127.0.0.1:5173")
+    # When set, the built frontend is served by the same process as the API.
+    static_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if self.tcp_port < 0 or self.tcp_port > 65535:
@@ -102,4 +104,5 @@ class Settings:
             identity_private_key_path=Path(key_path) if key_path else None,
             trusted_peer_keys=trusted,
             cors_origins=origins,
+            static_dir=Path(static_dir) if (static_dir := os.getenv("STEGOCRYPT_STATIC_DIR")) else None,
         )

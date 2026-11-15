@@ -1,12 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { ReceiveMessagePage } from '../src/pages/ReceiveMessagePage';
 import { SessionProvider } from '../src/context/SessionContext';
 import { api } from '../src/services/api';
 
 function renderReceivePage() {
-  return render(<SessionProvider><ReceiveMessagePage /></SessionProvider>);
+  return render(<MemoryRouter><SessionProvider><ReceiveMessagePage /></SessionProvider></MemoryRouter>);
 }
 
 const createdSession = {
@@ -33,6 +34,7 @@ describe('ReceiveMessagePage', () => {
     expect(await screen.findByText('Verified hello')).toBeInTheDocument();
     expect(screen.getByText('42.1 dB')).toBeInTheDocument();
     expect(screen.getByText('Verified plaintext')).toBeInTheDocument();
+    expect(await screen.findByAltText('Received stego image')).toBeInTheDocument();
   });
 
   it('never renders plaintext when recovery is rejected', async () => {

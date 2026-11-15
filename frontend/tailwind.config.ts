@@ -12,6 +12,10 @@ export default {
         coral: '#ff8b72',
         gold: '#ffc857',
       },
+      fontFamily: {
+        display: ['"Iowan Old Style"', '"Palatino Linotype"', 'Palatino', 'Georgia', 'serif'],
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'sans-serif'],
+      },
       boxShadow: {
         soft: '0 18px 55px rgba(16, 35, 63, 0.09)',
         panel: '0 14px 36px rgba(16, 35, 63, 0.14)',

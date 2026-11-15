@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import os
 import stat
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,7 +67,11 @@ class IdentityKeyPair:
     def load(cls, path: Path) -> "IdentityKeyPair":
         try:
             metadata = path.stat()
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+            # POSIX group/other mode bits do not describe Windows ACLs, so the
+            # permission check only applies where those bits are authoritative.
+            if not stat.S_ISREG(metadata.st_mode) or (
+                os.name == "posix" and metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+            ):
                 raise BackendError(
                     ErrorCode.KEY_EXCHANGE_FAILED,
                     "The identity key permissions are too broad.",

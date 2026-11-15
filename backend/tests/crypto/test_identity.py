@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,7 @@ def test_identity_base64_and_signature_inputs_are_rejected_safely(value: str) ->
         verify_signature(identity.public_bytes, b"bad", b"data")
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX mode bits are not authoritative on this platform")
 def test_identity_loader_requires_private_file_permissions(tmp_path: Path) -> None:
     path = tmp_path / "identity.pem"
     identity = IdentityKeyPair.generate()
@@ -59,6 +61,14 @@ def test_identity_loader_requires_private_file_permissions(tmp_path: Path) -> No
         IdentityKeyPair.load(path)
 
     path.chmod(0o600)
+    assert IdentityKeyPair.load(path).public_bytes == identity.public_bytes
+
+
+def test_identity_loader_reads_a_private_pem(tmp_path: Path) -> None:
+    path = tmp_path / "identity.pem"
+    identity = IdentityKeyPair.generate()
+    path.write_bytes(_pem(identity))
+
     assert IdentityKeyPair.load(path).public_bytes == identity.public_bytes
 
 

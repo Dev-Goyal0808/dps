@@ -4,18 +4,21 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api import encryption_demo, evaluation, health, messages, sessions
 from app.config import Settings
 from app.crypto.identity import IdentityKeyPair, TrustedPeerStore
 from app.networking.tcp_server import TcpTransferServer
 from app.services.encryption_demo import EncryptionDemoService
+from app.services.preview_service import MessagePreviewService, PreviewStore
 from app.services.result_store import ResultStore
 from app.services.session_manager import SessionManager
 from app.services.workflow_service import WorkflowService
@@ -23,6 +26,18 @@ from app.utils.errors import BackendError, ErrorCode
 
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_static_dir(settings: Settings) -> Path | None:
+    """Find a built frontend to serve next to the API, if one exists."""
+    candidate = settings.static_dir
+    if candidate is None:
+        candidate = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+    try:
+        resolved = candidate.resolve()
+    except OSError:
+        return None
+    return resolved if (resolved / "index.html").is_file() else None
 
 
 def _load_identity(settings: Settings) -> IdentityKeyPair:
@@ -39,6 +54,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     trusted = configured_trust.add(identity.public_bytes)
     sessions_service = SessionManager(resolved, identity.fingerprint)
     encryption_demo_service = EncryptionDemoService(resolved, identity)
+    preview_store = PreviewStore()
+    preview_service = MessagePreviewService(resolved, identity, trusted, preview_store)
     results = ResultStore()
     workflow = WorkflowService(resolved, sessions_service, results, identity, trusted)
     server = TcpTransferServer(
@@ -73,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.identity = identity
     app.state.encryption_demo = encryption_demo_service
+    app.state.preview = preview_service
     app.state.sessions = sessions_service
     app.state.results = results
     app.state.workflow = workflow
@@ -124,6 +142,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(messages.router, prefix="/api")
     app.include_router(evaluation.router, prefix="/api")
     app.include_router(encryption_demo.router, prefix="/api")
+
+    # A single-process deployment serves the built SPA and the API from one
+    # origin, so CORS and a second web server are unnecessary.
+    static_dir = _resolve_static_dir(resolved)
+    app.state.static_dir = static_dir
+    if static_dir is not None:
+        assets = static_dir / "assets"
+        if assets.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str) -> FileResponse:
+            if full_path.startswith("api/"):
+                raise HTTPException(status_code=404)
+            candidate = (static_dir / full_path).resolve()
+            if full_path and candidate.is_file() and candidate.is_relative_to(static_dir):
+                return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
+            return FileResponse(static_dir / "index.html", headers={"Cache-Control": "no-cache"})
+
     return app
 
 

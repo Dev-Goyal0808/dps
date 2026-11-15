@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import hmac
 import uuid
 
 from PIL import Image
@@ -12,7 +13,12 @@ from app.crypto.aead import decrypt_serialized
 from app.crypto.identity import IdentityKeyPair, TrustedPeerStore
 from app.networking.tcp_client import TcpClient
 from app.networking.tcp_server import TcpTransferServer
-from app.services.metrics_service import build_metrics, image_quality
+from app.services.metrics_service import (
+    compare_images,
+    comparison_metrics,
+    envelope_metrics,
+    sender_metrics,
+)
 from app.services.result_store import ResultStore
 from app.services.session_manager import SessionManager, SessionPhase
 from app.steganography.capacity import require_capacity
@@ -39,6 +45,7 @@ class WorkflowService:
         self.server: TcpTransferServer | None = None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="stegocrypt-workflow")
         self._original_images: dict[str, Image.Image] = {}
+        self._expected_messages: dict[str, str] = {}
 
     def set_server(self, server: TcpTransferServer) -> None:
         self.server = server
@@ -74,6 +81,8 @@ class WorkflowService:
         message_id = uuid.uuid4()
         self.results.create(session_id, message_id)
         self._original_images[str(message_id)] = loaded.image.copy()
+        # Kept only to verify the receiver's round trip; never used as a result.
+        self._expected_messages[str(message_id)] = message
         self.sessions.update_phase(session_id, SessionPhase.VALIDATING, message_id=str(message_id))
         self._executor.submit(self._run_send, session_id, message_id, message, loaded.image.copy())
         return message_id
@@ -102,36 +111,39 @@ class WorkflowService:
             qim_delta=self.settings.qim_delta,
             on_phase=on_phase,
         )
+        plaintext_bytes = len(message.encode("utf-8"))
+
+        def on_embedded(payload: bytes, capacity_bytes: int, timings: dict[str, float]) -> None:
+            # Written before the image is sent, so these measurements are already
+            # in the record by the time the receiver reports COMPLETED.
+            self.results.update_metrics(
+                str(message_id),
+                sender_metrics(
+                    payload=payload,
+                    plaintext_bytes=plaintext_bytes,
+                    capacity_bytes=capacity_bytes,
+                    timings=timings,
+                ),
+            )
+
         try:
-            result = client.send(
+            client.send(
                 session_id=session_id,
                 message_id=message_id,
                 plaintext=message,
                 cover_image=cover,
+                on_embedded=on_embedded,
             )
-            original = self._original_images.pop(str(message_id), cover)
-            from app.steganography.image_io import load_image
-
-            stego = load_image(
-                result.image_bytes,
-                max_bytes=self.settings.max_stego_image_bytes,
-                max_width=self.settings.max_image_width,
-                max_height=self.settings.max_image_height,
-            ).image
-            metrics = build_metrics(
-                payload_bytes=result.payload_bytes,
-                capacity_bytes=result.capacity_bytes,
-                original=original,
-                stego=stego,
-                timings=result.timings,
-            )
-            self.results.update_metrics(str(message_id), metrics)
+            # Transmission time and image throughput are published by the receiver
+            # from its own clock, so they always share the basis of the receiver
+            # workflow time and payload throughput shown beside them.
         except BackendError as exc:
             self._fail(session_id, message_id, exc.code, exc.message)
         except Exception:
             self._fail(session_id, message_id, ErrorCode.TRANSFER_FAILED, "The image transfer failed.")
         finally:
             self._original_images.pop(str(message_id), None)
+            self._expected_messages.pop(str(message_id), None)
 
     def handle_received(
         self,
@@ -164,10 +176,17 @@ class WorkflowService:
             }
             original = self._original_images.get(message_key)
             if original is not None:
-                psnr, ssim = image_quality(original, loaded.image)
-                if psnr is not None:
-                    quality_metrics["psnr"] = psnr
-                quality_metrics["ssim"] = ssim
+                comparison = compare_images(original, loaded.image)
+                if comparison is not None:
+                    # The receiver publishes the same comparison the sender will
+                    # report, so a completed result is never partially filled.
+                    quality_metrics.update(
+                        comparison_metrics(
+                            comparison,
+                            payload_bytes=len(payload),
+                            pixels=loaded.image.width * loaded.image.height,
+                        )
+                    )
             capacity_bytes = int(quality_metrics["capacity_bytes"])
             payload_bytes = int(quality_metrics["payload_bytes"])
             quality_metrics["capacity_utilization"] = payload_bytes / capacity_bytes if capacity_bytes else 0.0
@@ -183,6 +202,11 @@ class WorkflowService:
             )
             plaintext = plaintext_bytes.decode("utf-8")
             decryption_seconds = timer.stop("decryption")
+            expected = self._expected_messages.pop(message_key, None)
+            plaintext_match = expected is not None and hmac.compare_digest(
+                plaintext.encode("utf-8"), expected.encode("utf-8")
+            )
+            workflow_seconds = transfer_seconds + extraction_seconds + decryption_seconds
             # Publish the recovery metrics before marking the record complete. This
             # makes a completed result self-consistent for clients that poll as soon
             # as the receiver transitions to COMPLETED; sender-side image-quality
@@ -191,10 +215,16 @@ class WorkflowService:
                 message_key,
                 {
                     **quality_metrics,
+                    **envelope_metrics(payload, plaintext_bytes=len(plaintext.encode("utf-8"))),
                     "extraction_time_ms": extraction_seconds * 1000,
                     "decryption_time_ms": decryption_seconds * 1000,
                     "transmission_time_ms": transfer_seconds * 1000,
                     "throughput_bytes_per_second": len(image_bytes) / transfer_seconds if transfer_seconds > 0 else 0.0,
+                    "workflow_time_ms": workflow_seconds * 1000,
+                    "payload_throughput_bytes_per_second": (
+                        payload_bytes / workflow_seconds if workflow_seconds > 0 else 0.0
+                    ),
+                    "plaintext_match": plaintext_match,
                     "recovery_status": "verified",
                 },
             )

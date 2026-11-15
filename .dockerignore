@@ -1,0 +1,14 @@
+.git
+.gitignore
+.cloud-attachments
+.freebuff
+backend/.venv
+backend/.pytest_cache
+backend/.mypy_cache
+backend/.ruff_cache
+backend/runtime
+frontend/node_modules
+frontend/dist
+**/__pycache__
+**/*.tsbuildinfo
+docs

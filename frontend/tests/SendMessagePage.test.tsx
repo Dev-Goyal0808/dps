@@ -1,12 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import { SendMessagePage } from '../src/pages/SendMessagePage';
 import { api } from '../src/services/api';
 import { SessionProvider } from '../src/context/SessionContext';
 
 function renderSendPage() {
-  return render(<SessionProvider><SendMessagePage /></SessionProvider>);
+  return render(<MemoryRouter><SessionProvider><SendMessagePage /></SessionProvider></MemoryRouter>);
 }
 
 describe('SendMessagePage', () => {

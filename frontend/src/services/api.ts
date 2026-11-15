@@ -1,10 +1,14 @@
 import type {
   ConnectSessionResponse,
   CreateSessionResponse,
+  EncryptionChannelResponse,
   EncryptionDemoRequest,
   EncryptionDemoResponse,
+  EncryptionReceiveResponse,
+  EncryptionSendResponse,
   EvaluationResponse,
   HealthResponse,
+  MessagePreviewResponse,
   MessageResult,
   SendMessageResponse,
   SessionStatusResponse,
@@ -106,6 +110,31 @@ export const api = {
     headers: authHeaders(token),
   }),
 
+  previewMessage: (token: string, sessionId: string, message: string, coverImage?: File) => {
+    const body = new FormData();
+    body.append('session_id', sessionId);
+    body.append('message', message);
+    if (coverImage) body.append('cover_image', coverImage);
+    return request<MessagePreviewResponse>('/messages/preview', {
+      method: 'POST',
+      headers: authHeaders(token),
+      body,
+    });
+  },
+
+  getPreviewImage: async (previewId: string, token: string): Promise<Blob> => {
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE_URL}/messages/preview/${encodeURIComponent(previewId)}/image`, {
+        headers: authHeaders(token),
+      });
+    } catch {
+      throw new ApiClientError('The preview image could not be reached.', 0, 'NETWORK_ERROR');
+    }
+    if (!response.ok) throw await parseError(response);
+    return response.blob();
+  },
+
   getMessageImage: async (messageId: string, token: string): Promise<Blob> => {
     let response: Response;
     try {
@@ -132,6 +161,29 @@ export const api = {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message } satisfies EncryptionDemoRequest),
+  }),
+
+  createEncryptionChannel: () => request<EncryptionChannelResponse>('/encryption/channels', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  }),
+
+  sendEncryptedMessage: (token: string, sessionId: string, message: string) => request<EncryptionSendResponse>(`/encryption/channels/${encodeURIComponent(sessionId)}/send`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(token),
+    },
+    body: JSON.stringify({ message }),
+  }),
+
+  receiveEncryptedMessage: (token: string, sessionId: string, messageId: string, serializedPayload?: string) => request<EncryptionReceiveResponse>(`/encryption/channels/${encodeURIComponent(sessionId)}/receive`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(token),
+    },
+    body: JSON.stringify({ message_id: messageId, ...(serializedPayload ? { serialized_payload: serializedPayload } : {}) }),
   }),
 };
 

@@ -7,7 +7,7 @@ StegoCrypt uses a browser frontend, a FastAPI orchestration layer, modular secur
 ```text
 ┌───────────────────────────────────────────────────────────┐
 │ React + TypeScript frontend                               │
-│ Home │ Send │ Receive │ Analysis │ About                  │
+│ Home │ Receive │ Send │ Analysis │ Lab │ About            │
 └───────────────────────────────┬───────────────────────────┘
                                 │ HTTP/JSON + multipart
 ┌───────────────────────────────▼───────────────────────────┐

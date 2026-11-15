@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies import bearer_token
 from app.schemas.common import ApiError
 from app.schemas.messages import MetricsResponse, ResultResponse, SendMessageResponse
+from app.schemas.preview import MessagePreviewResponse
+from app.services.session_manager import SessionPhase
 from app.steganography.image_io import load_image
 from app.utils.errors import BackendError, ErrorCode
 
@@ -42,6 +45,56 @@ async def send_message(
     )
     message_id = request.app.state.workflow.start_send(session_id, message, loaded)
     return SendMessageResponse(message_id=str(message_id), status="processing")
+
+
+@router.post("/messages/preview", response_model=MessagePreviewResponse)
+async def preview_message(
+    request: Request,
+    session_id: str = Form(...),
+    message: str = Form(...),
+    cover_image: UploadFile | None = File(default=None),
+    token: str = Depends(bearer_token),
+) -> MessagePreviewResponse:
+    sessions = request.app.state.sessions
+    session = sessions.authorize(session_id, token, "sender")
+    if session.status != SessionPhase.CONNECTED:
+        raise BackendError(
+            ErrorCode.TRANSFER_FAILED,
+            "The session is not ready for a message.",
+            status_code=409,
+        )
+    settings = request.app.state.settings
+    loaded = None
+    if cover_image is not None:
+        data = await cover_image.read(settings.max_cover_image_bytes + 1)
+        if len(data) > settings.max_cover_image_bytes:
+            raise BackendError(
+                ErrorCode.IMAGE_TOO_LARGE,
+                "The image upload is too large.",
+                status_code=413,
+                details={"max_bytes": settings.max_cover_image_bytes},
+            )
+        loaded = load_image(
+            data,
+            max_bytes=settings.max_cover_image_bytes,
+            max_width=settings.max_image_width,
+            max_height=settings.max_image_height,
+        )
+    preview = await run_in_threadpool(
+        request.app.state.preview.build, session_id, message, loaded
+    )
+    return MessagePreviewResponse.model_validate(preview)
+
+
+@router.get("/messages/preview/{preview_id}/image")
+async def get_preview_image(request: Request, preview_id: str, token: str = Depends(bearer_token)) -> Response:
+    stored = request.app.state.preview.store.get(preview_id)
+    request.app.state.sessions.identify_role(stored.session_id, token)
+    return Response(
+        content=stored.image_bytes,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/messages/{message_id}/result", response_model=ResultResponse)

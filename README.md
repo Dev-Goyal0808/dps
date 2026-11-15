@@ -9,9 +9,9 @@ StegoCrypt is a locally runnable academic web application for secure text commun
 - AES-256-GCM authenticated encryption.
 - Quantization Index Modulation (QIM) image steganography.
 - Length-framed TCP socket communication.
-- PSNR, SSIM, capacity, timing, throughput, and recovery measurements.
+- PSNR, SSIM, MSE/RMSE, changed-sample share, embedding rate, ciphertext entropy, capacity, timing, throughput, and recovery measurements.
 
-The current hosted slice focuses on the complete encryption path first: authenticated endpoint identities, X25519 key exchange, HKDF key derivation, AES-256-GCM encryption, payload serialization, and verified decryption. Steganography and image transfer remain documented but are intentionally not exposed in the current UI.
+The full workflow is exposed in the interface: create a receiving session, pair a sender with a one-shot join code, encrypt the message, embed it with QIM, transfer the PNG over TCP, recover it, and inspect measured image and network metrics. A separate Encryption Lab shows the cryptographic exchange on its own, without image processing or transfer.
 
 ## Documentation
 
@@ -27,43 +27,26 @@ The project design is documented before implementation:
 | [Cryptography](docs/cryptography.md) | Authenticated key exchange, HKDF, AES-GCM, and key management. |
 | [Steganography](docs/steganography.md) | QIM algorithm, image handling, payload format, and capacity. |
 | [Networking](docs/networking.md) | TCP client/server responsibilities and transfer behavior. |
-| [Evaluation](docs/evaluation.md) | PSNR, SSIM, timing, throughput, and experiment design. |
+| [Evaluation](docs/evaluation.md) | Image-quality, embedding-footprint, entropy, timing, throughput, and experiment design. |
 | [Testing](docs/testing.md) | Unit, integration, API, frontend, security, and performance checks. |
 | [Limitations](docs/limitations.md) | Security assumptions, known limitations, and non-goals. |
 | [Development roadmap](docs/development-roadmap.md) | Incremental implementation phases and completion criteria. |
 
-## Planned user flow
+## Full workflow
 
-## Current encryption-only demo
+1. Open the Receive page and create a receiving session.
+2. Share the session ID and eight-character join code with the sender.
+3. Open the Send page in another tab (or on another machine), enter the session ID and join code, and pair.
+4. Write a message and select a cover image.
+5. The backend performs the authenticated handshake, derives the AES-256-GCM key, encrypts the message, embeds the payload with QIM, and transfers the PNG over TCP.
+6. The receiver page follows the phases and shows plaintext only after the CRC and AES-GCM checks pass.
+7. Open the Analysis page to view measured image error, changed-sample share, embedding rate, ciphertext entropy, capacity, phase timings, throughput, and round-trip verification for that message.
 
-1. Open the Encryption Lab.
-2. Enter a message or load the supplied sample message.
-3. Submit the message to the backend encryption demo.
-4. The backend performs a real authenticated in-memory sender/receiver handshake.
-5. The message is encrypted with AES-256-GCM using an HKDF-derived session key.
-6. The responder decrypts and verifies the payload.
-7. The UI displays the verified recovery, ciphertext, nonce, fingerprints, transcript hash, and algorithm details.
+The Encryption Lab remains available as a focused view of the cryptographic exchange.
 
-The current UI does not perform image embedding, QIM, or TCP image transfer.
+## Local development
 
-## Full planned flow
-
-1. A receiver opens the Receive page and creates a receiving session.
-2. The application displays a short-lived session code and the receiver identity fingerprint.
-3. The sender enters the session code, writes a message, and selects a cover image.
-4. The backend validates the image and message size.
-5. The endpoints perform authenticated X25519 key exchange.
-6. HKDF derives a per-session AES-256-GCM key.
-7. The sender encrypts the message and embeds the encrypted payload using QIM.
-8. The resulting PNG is transferred through the Python TCP networking layer.
-9. The receiver reconstructs the PNG and extracts the embedded payload.
-10. AES-GCM authenticates and decrypts the payload.
-11. The receiver sees plaintext only after successful verification.
-12. The Analysis page displays measured image and transfer metrics.
-
-## Planned local development
-
-The implementation will use two processes:
+The local demonstration uses two processes:
 
 ```text
 Frontend:  http://localhost:5173
@@ -77,7 +60,7 @@ Install the backend dependencies in a virtual environment:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate    # Windows: .venv\Scripts\activate
 pip install -r backend/requirements-dev.txt
 ```
 
@@ -105,9 +88,9 @@ npm run dev
 
 The Vite development proxy forwards `/api` requests to `http://localhost:8000`. The frontend can also use `VITE_API_BASE_URL=http://localhost:8000` or `VITE_API_BASE_URL=http://localhost:8000/api`; both forms are normalized to the API path.
 
-## Planned verification commands
+## Verification commands
 
-Backend, from `backend/`:
+Backend, from `backend/` (with the virtual environment active):
 
 ```bash
 cd backend
@@ -126,10 +109,8 @@ npm run test
 npm run build
 ```
 
-These commands are documentation for the implementation phase. They will become executable once the source code and dependency manifests are added.
+The backend suite uses a POSIX permission check for the identity key file. That check is skipped on Windows, where POSIX mode bits are not authoritative.
 
 ## Security position
 
-StegoCrypt is an educational prototype, not a production messaging system. It will use established cryptographic libraries and will not implement cryptographic primitives manually. The project will explicitly document its trust model, local key configuration, payload limits, in-memory session behavior, and the lack of robustness against JPEG compression or image resizing.
-# dps
-# dps
+StegoCrypt is an educational prototype, not a production messaging system. It uses established cryptographic libraries and does not implement cryptographic primitives manually. The trust model, local key configuration, payload limits, in-memory session behavior, and the lack of robustness against JPEG compression or image resizing are documented in [docs/limitations.md](docs/limitations.md).

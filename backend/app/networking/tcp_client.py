@@ -26,6 +26,7 @@ class ClientTransferResult:
     image_bytes: bytes
     payload_bytes: int
     capacity_bytes: int
+    payload: bytes = field(default=b"", repr=False)
     timings: dict[str, float] = field(default_factory=dict)
     transfer_seconds: float = 0.0
 
@@ -45,6 +46,7 @@ class TcpClient:
         frame_timeout: float,
         qim_delta: int,
         on_phase: Callable[[str, float], None] | None = None,
+        on_embedded: Callable[[bytes, int, dict[str, float]], None] | None = None,
         handshake_timeout: float | None = None,
         transfer_timeout: float | None = None,
     ) -> None:
@@ -61,6 +63,7 @@ class TcpClient:
         self.transfer_timeout = transfer_timeout or frame_timeout
         self.qim_delta = qim_delta
         self.on_phase = on_phase
+        self.on_embedded = on_embedded
 
     def _phase(self, name: str, elapsed: float) -> None:
         if self.on_phase is not None:
@@ -73,6 +76,7 @@ class TcpClient:
         message_id: uuid.UUID,
         plaintext: str,
         cover_image: Image.Image,
+        on_embedded: Callable[[bytes, int, dict[str, float]], None] | None = None,
     ) -> ClientTransferResult:
         timer = PhaseTimer()
         timer.start("connect")
@@ -123,6 +127,23 @@ class TcpClient:
             embedding_seconds = timer.stop("embedding")
             self._phase("embedding", embedding_seconds)
 
+            timings = {
+                "connection_seconds": connect_seconds,
+                "handshake_seconds": timer.durations["handshake"],
+                "encryption_seconds": encryption_seconds,
+                "embedding_seconds": embedding_seconds,
+            }
+            publish_embedded = on_embedded or self.on_embedded
+            if publish_embedded is not None:
+                # Publish the sender-side measurements before the transfer starts,
+                # so a result read as soon as the receiver completes already has
+                # every timer that was measured instead of a placeholder zero.
+                publish_embedded(
+                    payload,
+                    (cover_image.width * cover_image.height * 3) // 8,
+                    timings,
+                )
+
             chunk_count = (len(image_bytes) + self.chunk_size - 1) // self.chunk_size
             metadata = TransferMetadata(
                 message_id,
@@ -160,13 +181,8 @@ class TcpClient:
                 image_bytes=image_bytes,
                 payload_bytes=len(payload),
                 capacity_bytes=(cover_image.width * cover_image.height * 3) // 8,
-                timings={
-                    "connection_seconds": connect_seconds,
-                    "handshake_seconds": timer.durations["handshake"],
-                    "encryption_seconds": encryption_seconds,
-                    "embedding_seconds": embedding_seconds,
-                    "transfer_seconds": transfer_seconds,
-                },
+                payload=payload,
+                timings={**timings, "transfer_seconds": transfer_seconds},
                 transfer_seconds=transfer_seconds,
             )
         except BackendError:
